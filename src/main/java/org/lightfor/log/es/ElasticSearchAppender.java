@@ -80,7 +80,7 @@ public class ElasticSearchAppender extends AppenderSkeleton {
         RotateIndexType rotateIndexParam = RotateIndexType.DAY;
         String node = "local";
         String service;
-        int buffer = 50000;
+        int buffer = 5000;
         long expiry = -1;
     }
 
@@ -265,6 +265,9 @@ public class ElasticSearchAppender extends AppenderSkeleton {
                     eve.put("level", event.getLevel().toString());
                     eve.put("loggerFQDN", event.getFQNOfLoggerClass());
                     eve.put("thread", ievent.threadName);
+                    eve.put("class", event.getLocationInformation().getClassName());
+                    eve.put("method", event.getLocationInformation().getMethodName());
+                    eve.put("line", event.getLocationInformation().getLineNumber());
                     eve.put("message", event.getMessage());
                     for (Object key : event.getProperties().keySet()) {// key cannot contain '.'
                         eve.put(String.format("mdc_%s", key.toString()), event.getProperties().get(key).toString());
