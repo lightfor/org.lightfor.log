@@ -3,6 +3,7 @@ package org.lightfor.log.es;
 import org.apache.log4j.AppenderSkeleton;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
+import org.apache.log4j.spi.LocationInfo;
 import org.apache.log4j.spi.LoggingEvent;
 import org.apache.log4j.spi.ThrowableInformation;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
@@ -27,7 +28,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.PropertyResourceBundle;
 import java.util.ResourceBundle;
-import java.util.TimeZone;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -57,11 +57,18 @@ public class ElasticSearchAppender extends AppenderSkeleton {
 
     static class InternalLogEvent {
         String threadName = "";
+        String clazz = "";
+        String method = "";
+        String line = "";
         LoggingEvent eve;
 
         InternalLogEvent(LoggingEvent loggingEvent) {
             eve = loggingEvent;
             threadName = eve.getThreadName();
+            LocationInfo locationInfo = eve.getLocationInformation();
+            clazz = locationInfo.getClassName();
+            method = locationInfo.getMethodName();
+            line = locationInfo.getLineNumber();
         }
     }
 
@@ -226,7 +233,7 @@ public class ElasticSearchAppender extends AppenderSkeleton {
                 client.close();
                 logger.error("unable to connect to Elasticsearch cluster");
                 try {
-                    Thread.sleep(1000);
+                    Thread.sleep(5000);
                 } catch (InterruptedException e) {
                     logger.error("Exception", e);
                 }
@@ -252,22 +259,19 @@ public class ElasticSearchAppender extends AppenderSkeleton {
                     if ((event.getTimeStamp() / 3600000L) != indexHour) {
                         indexHour = event.getTimeStamp() / 3600000L;
                         long localTime = event.getTimeStamp();
-                        Date dd = new Date(localTime - TimeZone.getDefault().getOffset(localTime));
+                        Date dd = new Date(localTime);
                         resolvedIndex = config.index + "-" + formatDay.format(dd);
                     }
 
                     eve.clear();
-                    eve.put("@version", 1);
                     eve.put("@timestamp", formatElastic.format(new Date(event.getTimeStamp())));
-                    eve.put("@source", config.service);
+                    eve.put("service", config.service);
                     eve.put("host", config.node);
-                    eve.put("logger", event.getLoggerName());
                     eve.put("level", event.getLevel().toString());
-                    eve.put("loggerFQDN", event.getFQNOfLoggerClass());
                     eve.put("thread", ievent.threadName);
-                    eve.put("class", event.getLocationInformation().getClassName());
-                    eve.put("method", event.getLocationInformation().getMethodName());
-                    eve.put("line", event.getLocationInformation().getLineNumber());
+                    eve.put("class", ievent.clazz);
+                    eve.put("method", ievent.method);
+                    eve.put("line", ievent.line);
                     eve.put("message", event.getMessage());
                     for (Object key : event.getProperties().keySet()) {// key cannot contain '.'
                         eve.put(String.format("mdc_%s", key.toString()), event.getProperties().get(key).toString());
