@@ -86,7 +86,6 @@ public class ElasticSearchAppender extends AppenderSkeleton {
         String type = "log";
         RotateIndexType rotateIndexParam = RotateIndexType.DAY;
         String node = "local";
-        String service;
         int buffer = 5000;
         long expiry = -1;
     }
@@ -136,7 +135,6 @@ public class ElasticSearchAppender extends AppenderSkeleton {
             e.printStackTrace();
         }
         config.node = getProp(getPropertiesString("node", rb), "node", myHost);
-        config.service = getProp(getPropertiesString("service", rb), "service", "Java");
         config.cluster = getProp(getPropertiesString("elasticCluster", rb), "elasticCluster", "elasticsearch");
         String elasticLocal = getProp(getPropertiesString("elasticLocal", rb), "elasticLocal", "native://localhost:9300");
         String[] uriDat = elasticLocal.split(",");
@@ -209,9 +207,9 @@ public class ElasticSearchAppender extends AppenderSkeleton {
                 .put("network.server", false)
                 .put("node.client", true)
                 .put("client.transport.sniff", false)
-                .put("client.transport.ping_timeout", "30s")
+                .put("client.transport.ping_timeout", "2s")
                 .put("client.transport.ignore_cluster_name", false)
-                .put("client.transport.nodes_sampler_interval", "30s")
+                .put("client.transport.nodes_sampler_interval", "2s")
                 .build();
 
         Logger logger = LogManager.getLogger("ElasticAppender " + config.name);
@@ -235,7 +233,7 @@ public class ElasticSearchAppender extends AppenderSkeleton {
                 try {
                     Thread.sleep(5000);
                 } catch (InterruptedException e) {
-                    logger.error("Exception", e);
+                    logger.error("Elasticsearch Exception", e);
                 }
                 continue;
             }
@@ -245,14 +243,14 @@ public class ElasticSearchAppender extends AppenderSkeleton {
                 try {
                     ilog = que.poll(20, TimeUnit.SECONDS);
                 } catch (InterruptedException e) {
-                    logger.error("Exception", e);
+                    logger.error("Elasticsearch Exception", e);
                 }
                 if (ilog == null) {
                     continue;
                 }
                 List<InternalLogEvent> logs = new LinkedList<>();
                 logs.add(ilog);
-                que.drainTo(logs, 500);
+                que.drainTo(logs, 50);
                 BulkRequestBuilder bulkRequest = client.prepareBulk();
                 for (InternalLogEvent ievent : logs) {
                     LoggingEvent event = ievent.eve;
@@ -265,7 +263,6 @@ public class ElasticSearchAppender extends AppenderSkeleton {
 
                     eve.clear();
                     eve.put("@timestamp", formatElastic.format(new Date(event.getTimeStamp())));
-                    eve.put("service", config.service);
                     eve.put("host", config.node);
                     eve.put("level", event.getLevel().toString());
                     eve.put("thread", ievent.threadName);
@@ -289,7 +286,17 @@ public class ElasticSearchAppender extends AppenderSkeleton {
                     }
                     bulkRequest.add(d);
                 }
-                bulkRequest.execute();
+                try {
+                    bulkRequest.execute();
+                }catch (Exception e){
+                    try{
+                        client.close();
+                    } catch (Exception ex){
+                        logger.error("Elasticsearch Exception", ex);
+                    }
+                    logger.error("Elasticsearch Exception", e);
+                    break;
+                }
             }
         }
     }
