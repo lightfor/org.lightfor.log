@@ -1,8 +1,6 @@
 package org.lightfor.log.es;
 
 import org.apache.log4j.AppenderSkeleton;
-import org.apache.log4j.LogManager;
-import org.apache.log4j.Logger;
 import org.apache.log4j.spi.LocationInfo;
 import org.apache.log4j.spi.LoggingEvent;
 import org.apache.log4j.spi.ThrowableInformation;
@@ -11,6 +9,7 @@ import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,6 +28,8 @@ import java.util.Map;
 import java.util.PropertyResourceBundle;
 import java.util.ResourceBundle;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
@@ -39,10 +40,13 @@ import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilde
  */
 public class ElasticSearchAppender extends AppenderSkeleton {
 
+    private static final org.slf4j.Logger logger = LoggerFactory.getLogger(ElasticSearchAppender.class);
 
     @Override
     protected void append(LoggingEvent loggingEvent) {
-        que.offer(new InternalLogEvent(loggingEvent));
+        if(running){
+            que.offer(new InternalLogEvent(loggingEvent));
+        }
     }
 
     @Override
@@ -77,6 +81,8 @@ public class ElasticSearchAppender extends AppenderSkeleton {
     private volatile boolean running = false;
 
     private volatile Config config = null;
+
+    private ScheduledExecutorService scheduledExecutorService = null;
 
     static private class Config {
         String name = "elastic";
@@ -121,6 +127,13 @@ public class ElasticSearchAppender extends AppenderSkeleton {
                     e.printStackTrace();
                 }
             }
+        }
+
+
+        String esSwitch = getPropertiesString("esSwitch", rb);
+        running = "on".equalsIgnoreCase(esSwitch);
+        if(!running){
+            return running;
         }
 
         config = new Config();
@@ -194,10 +207,21 @@ public class ElasticSearchAppender extends AppenderSkeleton {
         }
         que = new ArrayBlockingQueue<>(config.buffer);
 
-        String esSwitch = getPropertiesString("esSwitch", rb);
-        if(esSwitch != null){
-            running = "on".equalsIgnoreCase(esSwitch);
-        }
+        scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
+
+        scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                int size = que.size();
+
+                if (size >= 1500 && size % 3 == 0) {
+                    logger.error("队列中数量size={}", size);
+                } else if (size > 4000){
+                    logger.error("队列中数量过大size={}***************", size);
+                }
+            }
+        }, 1, 1, TimeUnit.MINUTES);
+
         return running;
     }
 
@@ -207,12 +231,11 @@ public class ElasticSearchAppender extends AppenderSkeleton {
                 .put("network.server", false)
                 .put("node.client", true)
                 .put("client.transport.sniff", false)
-                .put("client.transport.ping_timeout", "2s")
+                .put("client.transport.ping_timeout", "5s")
                 .put("client.transport.ignore_cluster_name", false)
-                .put("client.transport.nodes_sampler_interval", "2s")
+                .put("client.transport.nodes_sampler_interval", "5s")
                 .build();
 
-        Logger logger = LogManager.getLogger("ElasticAppender " + config.name);
         logger.info("Start now ElasticAppender Thread");
 
         String resolvedIndex = null;
